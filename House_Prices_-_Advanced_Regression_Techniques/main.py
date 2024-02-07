@@ -1,12 +1,10 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-%matplotlib inline
+import tensorflow as tf
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_squared_error, make_scorer
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
+from sklearn.preprocessing import StandardScaler
 from scipy.stats import skew
 
 data = pd.read_csv('train.csv')
@@ -21,6 +19,8 @@ data = data.drop(['Id'], axis=1)
 # plt.show()
 
 data = data[data.GrLivArea <= 4000]
+
+data.loc[:, "SalePrice"] = np.log1p(data.loc[:, "SalePrice"])
 
 y = data["SalePrice"]
 
@@ -93,6 +93,41 @@ data = data.replace({
 
 print(f'Numerical features: {data.select_dtypes("number").columns.size}')
 
+corr = data.corr()
+corr.sort_values(["SalePrice"], ascending = False, inplace = True)
+# print(corr.SalePrice)
+
+data["OverallQual-s2"] = data["OverallQual"] ** 2
+data["OverallQual-s3"] = data["OverallQual"] ** 3
+data["OverallQual-Sq"] = np.sqrt(data["OverallQual"])
+data["TotalBsmtSF-2"] = data["TotalBsmtSF"] ** 2
+data["TotalBsmtSF-3"] = data["TotalBsmtSF"] ** 3
+data["TotalBsmtSF-Sq"] = np.sqrt(data["TotalBsmtSF"])
+data["1stFlrSF-2"] = data["1stFlrSF"] ** 2
+data["1stFlrSF-3"] = data["1stFlrSF"] ** 3
+data["1stFlrSF-Sq"] = np.sqrt(data["1stFlrSF"])
+data["GrLivArea-2"] = data["GrLivArea"] ** 2
+data["GrLivArea-3"] = data["GrLivArea"] ** 3
+data["GrLivArea-Sq"] = np.sqrt(data["GrLivArea"])
+data["BsmtQual-s2"] = data["BsmtQual"] ** 2
+data["BsmtQual-s3"] = data["BsmtQual"] ** 3
+data["BsmtQual-Sq"] = np.sqrt(data["BsmtQual"])
+data["ExterQual-2"] = data["ExterQual"] ** 2
+data["ExterQual-3"] = data["ExterQual"] ** 3
+data["ExterQual-Sq"] = np.sqrt(data["ExterQual"])
+data["GarageCars-2"] = data["GarageCars"] ** 2
+data["GarageCars-3"] = data["GarageCars"] ** 3
+data["GarageCars-Sq"] = np.sqrt(data["GarageCars"])
+data["FullBath-2"] = data["FullBath"] ** 2
+data["FullBath-3"] = data["FullBath"] ** 3
+data["FullBath-Sq"] = np.sqrt(data["FullBath"])
+data["KitchenQual-2"] = data["KitchenQual"] ** 2
+data["KitchenQual-3"] = data["KitchenQual"] ** 3
+data["KitchenQual-Sq"] = np.sqrt(data["KitchenQual"])
+data["GarageArea-2"] = data["GarageArea"] ** 2
+data["GarageArea-3"] = data["GarageArea"] ** 3
+data["GarageArea-Sq"] = np.sqrt(data["GarageArea"])
+
 cat_feat = data.select_dtypes(exclude = ['number']).columns
 num_feat = data.select_dtypes(include = ['number']).columns
 
@@ -100,37 +135,43 @@ num_feat = num_feat.drop("SalePrice")
 
 print(f'Categorical features: {cat_feat.size} - Numerical features: {num_feat.size}')
 
-data_num = data[num_feat]
-data_cat = data[cat_feat]
+data_num = data.loc[:, num_feat]
+data_cat = data.loc[:, cat_feat]
 
 skewness = data_num.apply(lambda x: skew(x))
 skewed_feat = skewness[abs(skewness) > 0.5].index
-data_num[skewed_feat] = np.log1p(data_num[skewed_feat])
+data_num.loc[:, skewed_feat] = np.log1p(data_num.loc[:, skewed_feat])
 
 data_cat = pd.get_dummies(data_cat)
 
-print(f'Categorical features: {data.select_dtypes(exclude = ["number"]).columns.size} - Numerical features: {data.select_dtypes(include = ["number"]).columns.size}')
+print(f'Categorical features: {data_cat.columns.size} - Numerical features: {data_num.columns.size}')
 
 data = pd.concat([data_num, data_cat], axis = 1)
 
 X_train, X_test, y_train, y_test = train_test_split(data, y, test_size = 0.3, random_state = 0)
 
-normalizer = tf.keras.layers.Normalization()
-normalizer.adapt(np.array(X_train))
+scaler = StandardScaler()
+X_train.loc[:, num_feat] = scaler.fit_transform(X_train.loc[:, num_feat])
+X_test.loc[:, num_feat] = scaler.transform(X_test.loc[:, num_feat])
+
+_,feat_num = X_train.shape
 
 model = tf.keras.Sequential([
-    normalizer,
-    layers.Dense(64, activation='relu'),
-    layers.Dense(64, activation='relu'),
-    layers.Dense(1)
+    tf.keras.layers.Input(shape=(feat_num,)),
+    tf.keras.layers.Dense(units=256, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.001)),
+    tf.keras.layers.Dense(units=256, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.001)),
+    tf.keras.layers.Dense(units=128, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.001)),
+    tf.keras.layers.Dense(units=64, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.001)),
+    tf.keras.layers.Dense(units=1)
 ])
 
-model.compile(loss='mean_squared_error', optimizer=tf.keras.optimizers.Adam(0.01))
+model.compile(
+    loss=tf.keras.losses.MeanSquaredError(),
+    optimizer=tf.keras.optimizers.Adam(0.0005),
+    metrics=[tf.keras.metrics.MeanSquaredError()])
 
-history = model.fit(X_train, y_train, epochs=100)
+model.fit(X_train, y_train, batch_size=100, epochs=1000)
 
 model.evaluate(X_test, y_test)
 
-print(data.columns)
-print(X_train.shape)
-print(X_train.first)
+data_test = pd.read_csv('test.csv')S
