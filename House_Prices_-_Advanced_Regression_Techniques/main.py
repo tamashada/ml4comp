@@ -6,25 +6,21 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_squared_error, make_scorer
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import skew
+from typing import Tuple
 
-def init(file: str) -> pd.DataFrame:
-  data = pd.read_csv(file)
+data_train = pd.read_csv('train.csv')
+data_test = pd.read_csv('test.csv')
 
-  data.drop_duplicates(['Id'])
-  data = data.drop(['Id'], axis=1)
+data_train.drop_duplicates(['Id'])
+data_test.drop_duplicates(['Id'])
 
-  # plt.scatter(data.GrLivArea, data.SalePrice, c = "blue", marker = "s")
-  # plt.title("Looking for outliers")
-  # plt.xlabel("GrLivArea")
-  # plt.ylabel("SalePrice")
-  # plt.show()
+# plt.scatter(data.GarageYrBlt, data.GrLivArea, c = "blue", marker = "s")
+# plt.title("Looking for outliers")
+# plt.xlabel("GarageYrBlt")
+# plt.ylabel("GrLivArea")
+# plt.show()
 
-  data = data[data.GrLivArea <= 4000]
-
-  return data
-
-data_train = init('train.csv')
-data_test = init('test.csv')
+data_train = data_train[data_train.GrLivArea <= 4000]
 
 y = np.log1p(data_train.loc[:, "SalePrice"])
 
@@ -189,21 +185,16 @@ data_test = rank_impor(data_test)
 print(data_train.shape)
 print(data_test.shape)
 
-def handle_skew(data: pd.DataFrame) -> pd.DataFrame:
-  num_feat = data.select_dtypes(include = ['number']).columns
+test_id = data_test.loc[:, "Id"]
+num_feat = data_train.select_dtypes(include = ['number']).columns.drop("Id")
 
-  data_num = data.loc[:, num_feat]
+data_train_num = data_train.loc[:, num_feat]
+data_test_num = data_test.loc[:, num_feat]
 
-  skewness = data_num.apply(lambda x: skew(x))
-  skewed_feat = skewness[abs(skewness) > 0.5].index
-  data_num.loc[:, skewed_feat] = np.log1p(data_num.loc[:, skewed_feat])
-
-  print(f'Numerical features: {data_num.columns.size}')
-
-  return data_num
-
-data_train_num = handle_skew(data_train)
-data_test_num = handle_skew(data_test)
+skewness = data_train_num.apply(lambda x: skew(x))
+skewed_feat = skewness[abs(skewness) > 0.5].index
+data_train_num.loc[:, skewed_feat] = np.log1p(data_train_num.loc[:, skewed_feat])
+data_test_num.loc[:, skewed_feat] = np.log1p(data_test_num.loc[:, skewed_feat])
 
 def one_hot_encode(data: pd.DataFrame) -> pd.DataFrame:
   cat_feat = data.select_dtypes(exclude = ['number']).columns
@@ -245,18 +236,27 @@ _,feat_num = X_train.shape
 
 model = tf.keras.Sequential([
     tf.keras.layers.Input(shape=(feat_num,)),
-    tf.keras.layers.Dense(units=512, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.001)),
-    tf.keras.layers.Dense(units=256, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.001)),
-    tf.keras.layers.Dense(units=128, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.001)),
-    tf.keras.layers.Dense(units=64, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.001)),
+    tf.keras.layers.Dense(units=256, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.005)),
+    tf.keras.layers.Dense(units=256, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.005)),
+    tf.keras.layers.Dense(units=256, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.005)),
+    tf.keras.layers.Dense(units=256, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(.005)),
     tf.keras.layers.Dense(units=1)
 ])
 
-model.compile(
+history = model.compile(
     loss=tf.keras.losses.MeanSquaredError(),
-    optimizer=tf.keras.optimizers.Adam(0.0001),
+    optimizer=tf.keras.optimizers.Adam(0.0005),
     metrics=[tf.keras.metrics.MeanSquaredError()])
 
 model.fit(X_train, y_train, batch_size=50, epochs=1000)
 
 model.evaluate(X_cv, y_cv)
+
+y_predicted = model.predict(X_test)
+y_predicted = np.expm1(y_predicted)
+
+# for col,x1,x2,x3 in zip(X_train.columns, X_train.head(1).to_numpy().reshape(-1), X_cv.head(1).to_numpy().reshape(-1), X_test.head(1).to_numpy().reshape(-1)):
+#   print(f'col: {col}, x1: {x1}, x2: {x2}, x3: {x3}')
+
+submission = pd.DataFrame({'Id': test_id, 'SalePrice': y_predicted.reshape(-1)})
+submission.to_csv('submission.csv', index=False)
